@@ -13,6 +13,7 @@ def main():
     # Add an argument
     parser.add_argument('--url', type=str, help="This is the URL of the JSON file to be imported")
     parser.add_argument('--date', type=str, help="The date in YYYY-MM-DD format to process results though. Everything after will be treated as a future match")
+    parser.add_argument('--historic', type=bool, help="If True it will calculate the SOS for each week from the beinging of the season to the date specified (or todays date if no date is specified).")
 
     # Parse the arguments
     args = parser.parse_args()
@@ -35,16 +36,34 @@ def main():
 
 
     # end initialization code    
-
+    if args.date:
+        date = args.date
+    else:
+        date = datetime.today()
     
-    processRecords(args.date) # process match results through this date
-
     db = SQL("sqlite:///premier_league.db")
     teams = db.execute("SELECT COUNT(*) AS num_teams FROM teams")
     team_count = teams[0]["num_teams"]
 
+    if args.historic:
+        match_days = db.execute("SELECT DISTINCT DATE(match_date) AS match_date FROM matches WHERE match_date <= ?;", date)
+        match_days = [d['match_date'] for d in match_days]
+    else:
+        match_days = []
+        match_days.append(date)
+
+    processRecords(match_days) # process match results through this date
+
+    
     for team_id in range(1, team_count + 1):
-        compute_SOS(team_id, args.date)
+        if args.historic:
+             #compute SOS for every day there is a match
+            for match_day in match_days:
+                compute_SOS(team_id, match_day)
+                # input("PAUSE......press ANYKEY")
+        else:
+            #compute SOS for single date
+            compute_SOS(team_id, date)
 
     display_results()
 
@@ -57,12 +76,13 @@ def compute_SOS(team_id, date=None):
     print(f"\n\nProcessing team {team_id} through {date}...")
     # Configure CS50 Library to use SQLite database
     db = SQL("sqlite:///premier_league.db")
-    db.execute("DELETE FROM remaining_fixture_data WHERE team_id = ?;", team_id)
+    db.execute("DELETE FROM remaining_fixture_data WHERE team_id = ? AND as_of_date =?;", team_id, date)
     
     home_schedule = db.execute("SELECT matches.away_id AS opponent, matches.match_date, teams.name, records.p FROM matches JOIN teams ON matches.away_id = teams.id JOIN records ON matches.away_id = records.team_id WHERE (matches.home_id = ?) AND matches.match_date > ?;",team_id,date)
 
     if len(home_schedule) == 0:
         print("No home games remaining")
+        home_pts = [0]
     else:
         home_pts = []
         print("\n\nHome Schedule\n----------")
@@ -75,6 +95,7 @@ def compute_SOS(team_id, date=None):
     
     if len(away_schedule) == 0:
         print("No away games remaining")
+        away_pts = [0]
     else:
         away_pts = []
         print("\n\nAway Schedule\n----------")
@@ -87,12 +108,12 @@ def compute_SOS(team_id, date=None):
         total_ave = total_pts / (len(home_pts) + len(away_pts))
 
         print(f"Avg Remaining -- HomePts: {sum(home_pts)/len(home_pts):.1f}; AwayPts: {sum(away_pts)/len(away_pts):.1f}; Total: {total_ave:.1f}")
-        db.execute("INSERT INTO remaining_fixture_data (team_id, opp_home_pts, opp_home_matches, opp_home_avg, opp_away_pts, opp_away_matches, opp_away_avg, total_avg, total_matches) VALUES (?,?,?,?,?,?,?,?,?);", team_id, sum(away_pts), len(away_pts), sum(away_pts)/len(away_pts), sum(home_pts), len(home_pts), sum(home_pts)/len(home_pts),total_ave,len(home_pts)+len(away_pts))
+        db.execute("INSERT INTO remaining_fixture_data (team_id, opp_home_pts, opp_home_matches, opp_home_avg, opp_away_pts, opp_away_matches, opp_away_avg, total_avg, total_matches, as_of_date) VALUES (?,?,?,?,?,?,?,?,?,?);", team_id, sum(away_pts), len(away_pts), sum(away_pts)/len(away_pts), sum(home_pts), len(home_pts), sum(home_pts)/len(home_pts),total_ave,len(home_pts)+len(away_pts), date)
 
 
 def display_results():
     db = SQL("sqlite:///premier_league.db")
-    results = db.execute("select name, total_avg, opp_home_avg, opp_away_avg, total_matches from remaining_fixture_data JOIN teams ON id = team_id  ORDER BY total_avg DESC, opp_home_avg DESC;")
+    results = db.execute("select name, total_avg, opp_home_avg, opp_away_avg, total_matches, as_of_date from remaining_fixture_data JOIN teams ON id = team_id  ORDER BY name;")
 
     print(f"\n\nSummary\n-----------\n")
     
@@ -176,9 +197,10 @@ def process_matches(team_score, opponent_score, record):
     record["ga"] += opponent_score
 
 
-def processRecords(date=None):
-    if date is None:
-        date = datetime.today()
+def processRecords(dates=None):
+    if dates is None:
+        dates = []
+        dates.append(datetime.today())
 
     db = SQL("sqlite:///premier_league.db")
     db.execute("DELETE FROM records")
@@ -188,19 +210,20 @@ def processRecords(date=None):
         record = {"w": 0, "d": 0, "l": 0, "p": 0, "gd": 0, "gf": 0, "ga": 0}
         print(f"\n\nTeam {team["id"]} - {team["name"]}\n----------")
         
-        #select and process home matches
-        results = db.execute("SELECT * FROM matches WHERE home_id = ? AND match_date <= ?;", team["id"], date)
-        for result in results:
-            process_matches(result["home_score"], result["away_score"], record)
-         
-        #select and process away matches
-        results = db.execute("SELECT * FROM matches WHERE away_id = ? AND match_date <= ?;", team["id"], date)
-        for result in results:
-            process_matches(result["away_score"], result["home_score"], record)
+        for date in dates:
+            #select and process home matches
+            results = db.execute("SELECT * FROM matches WHERE home_id = ? AND match_date <= ?;", team["id"], date)
+            for result in results:
+                process_matches(result["home_score"], result["away_score"], record)
+            
+            #select and process away matches
+            results = db.execute("SELECT * FROM matches WHERE away_id = ? AND match_date <= ?;", team["id"], date)
+            for result in results:
+                process_matches(result["away_score"], result["home_score"], record)
 
-        print(record)
-        db.execute("INSERT INTO records (team_id, w, d, l, p, gd, gf, ga) VALUES (?, ?, ?, ?, ?, ?, ?, ?);", team["id"], record["w"], record["d"], record["l"], record["p"], record["gd"], record["gf"], record["ga"])    
-    
+            print(record)
+            db.execute("INSERT INTO records (team_id, w, d, l, p, gd, gf, ga, as_of_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);", team["id"], record["w"], record["d"], record["l"], record["p"], record["gd"], record["gf"], record["ga"], date)    
+        
 
 def team_selection(teams):
     print(f"\nTeams\n----------")
