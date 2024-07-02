@@ -74,7 +74,7 @@ def main():
                 compute_SOS(team_id, date)
 
     display_results()
-    plot_results()
+    plot_results([1,2,3])
 
     return 0
 
@@ -191,31 +191,24 @@ def load_teamDB(teams):
     return True
 
 
-def plot_results():
+def plot_results(team_ids):
     db = SQL("sqlite:///premier_league.db")
-    sql_query = "select total_avg, as_of_date from remaining_fixture_data JOIN teams ON id = team_id WHERE id = 1 ORDER BY as_of_date;"
-    results = db.execute(sql_query)
 
-    x = []
-    y = []
-    for result in results:
-        x.append(datetime.strptime(result["as_of_date"], "%Y-%m-%d"))
-        y.append(result["total_avg"])
-    
-    plt.plot(x, y)
+    for team_id in team_ids:
 
-    sql_query = "select total_avg, as_of_date from remaining_fixture_data JOIN teams ON id = team_id WHERE id = 2 ORDER BY as_of_date;"
-    results = db.execute(sql_query)
+        sql_query = "select total_avg, as_of_date from remaining_fixture_data JOIN teams ON id = team_id WHERE id = ? ORDER BY as_of_date;"
+        results = db.execute(sql_query, team_id)
 
-    x = []
-    y = []
-    for result in results:
-        x.append(datetime.strptime(result["as_of_date"], "%Y-%m-%d"))
-        y.append(result["total_avg"])
-    
-    plt.plot(x, y)
+        x = []
+        y = []
+        for result in results:
+            x.append(datetime.strptime(result["as_of_date"], "%Y-%m-%d"))
+            y.append(result["total_avg"])
+        
+        plt.plot(x, y)
 
     plt.show()
+    
 
 
 def process_matches(team_score, opponent_score, record):
