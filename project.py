@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--date', type=str, help="The date in YYYY-MM-DD format to process results though. Everything after will be treated as a future match")
     parser.add_argument('--historic', type=bool, help="If True it will calculate the SOS for each week from the beinging of the season to the date specified (or todays date if no date is specified).")
     parser.add_argument('--teams', type=str, help="A list in [team1, team2, ..., teamn] format listing the teams to be plotted")
+    parser.add_argument('--team_list', type=bool, help="Prints a list of all the teams in the leauge for the loaded dataset")
                         
     # Parse the arguments
     args = parser.parse_args()
@@ -49,6 +50,12 @@ def main():
         date = datetime.today()
     
     db = SQL("sqlite:///premier_league.db")
+
+    if args.team_list:
+        print(team_list())
+        return 0
+
+
     teams = db.execute("SELECT COUNT(*) AS num_teams FROM teams")
     team_count = teams[0]["num_teams"]
 
@@ -74,7 +81,7 @@ def main():
                 compute_SOS(team_id, date)
 
     display_results()
-    plot_results([1,2,3])
+    plot_results([1,2,20])
 
     return 0
 
@@ -196,7 +203,7 @@ def plot_results(team_ids):
 
     for team_id in team_ids:
 
-        sql_query = "select total_avg, as_of_date from remaining_fixture_data JOIN teams ON id = team_id WHERE id = ? ORDER BY as_of_date;"
+        sql_query = "select name, total_avg, as_of_date from remaining_fixture_data JOIN teams ON id = team_id WHERE id = ? ORDER BY as_of_date;"
         results = db.execute(sql_query, team_id)
 
         x = []
@@ -205,11 +212,13 @@ def plot_results(team_ids):
             x.append(datetime.strptime(result["as_of_date"], "%Y-%m-%d"))
             y.append(result["total_avg"])
         
-        plt.plot(x, y)
+     
+        plt.plot(x, y, label=result["name"])
 
+    plt.xticks(rotation='vertical')
+    plt.legend()
     plt.show()
     
-
 
 def process_matches(team_score, opponent_score, record):
     if int(team_score) > int(opponent_score):
@@ -254,6 +263,12 @@ def processRecords(dates=None):
             print(record)
             db.execute("INSERT INTO records (team_id, w, d, l, p, gd, gf, ga, as_of_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);", team["id"], record["w"], record["d"], record["l"], record["p"], record["gd"], record["gf"], record["ga"], date)    
         
+
+def team_list():
+    db = SQL("sqlite:///premier_league.db")
+    results = db.execute("SELECT name FROM teams")
+    return tabulate(results, headers="keys", tablefmt="pretty") + "\n"
+
 
 def team_selection(teams):
     print(f"\nTeams\n----------")
